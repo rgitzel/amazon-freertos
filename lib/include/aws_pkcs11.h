@@ -61,7 +61,7 @@
 /* Undefine the macro for Keil Compiler to avoid conflict */
 #if defined( __PASTE ) && defined( __CC_ARM )
 /* ARM RCVT stdint.h has a duplicate definition with PKCS #11. */
-#undef __PASTE
+    #undef __PASTE
 #endif
 
 #include "pkcs11.h"
@@ -100,6 +100,8 @@ typedef struct PKCS11_PrivateRsaKeyTemplate
     CK_ATTRIBUTE xModulus;
     CK_ATTRIBUTE xPrivateExponent;
     CK_ATTRIBUTE xPublicExponent;
+    CK_ATTRIBUTE xPrime1;
+    CK_ATTRIBUTE xPrime2;
     CK_ATTRIBUTE xTokenObject;
 } PKCS11_PrivateRsaKeyTemplate_t, * PKCS11_PrivateRsaKeyTemplatePtr_t;
 
