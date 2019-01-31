@@ -40,6 +40,10 @@
 /* C runtime includes. */
 #include <string.h>
 
+/* Threading mutex implementations for SoftHSM */
+#include "mbedtls/threading.h"
+#include "threading_alt.h"
+
 /**
  * @brief Internal signature verification context structure
  */
@@ -144,9 +148,109 @@ static BaseType_t prvVerifySignature( char * pcSignerCertificate,
 void CRYPTO_ConfigureHeap( void )
 {
     /*
-     * Ensure that the FreeRTOS heap is used
+     * Ensure that the FreeRTOS heap is used.
      */
     mbedtls_platform_set_calloc_free( prvCalloc, vPortFree ); /*lint !e534 This function always return 0. */
+}
+
+
+/* Threading mutex implementations for mbedTLS. */
+#include "mbedtls/threading.h"
+#include "threading_alt.h"
+
+/**
+ * @brief Implementation of mbedtls_mutex_init for thread-safety.
+ *
+ */
+void aws_mbedtls_mutex_init( mbedtls_threading_mutex_t * mutex )
+{
+    if( mutex->is_valid != 1 )
+    {
+        mutex->mutex = xSemaphoreCreateMutex();
+
+        if( mutex->mutex != NULL )
+        {
+            mutex->is_valid = 1;
+        }
+        else
+        {
+            /*PKCS11_PRINT( ("Failed to initialize mbedTLS mutex.\r\n") ); */
+        }
+    }
+}
+
+/**
+ * @brief Implementation of mbedtls_mutex_free for thread-safety.
+ *
+ */
+void aws_mbedtls_mutex_free( mbedtls_threading_mutex_t * mutex )
+{
+    if( mutex->is_valid == 1 )
+    {
+        vSemaphoreDelete( mutex->mutex );
+        mutex->is_valid = 0;
+    }
+}
+
+/**
+ * @brief Implementation of mbedtls_mutex_lock for thread-safety.
+ *
+ * @return 0 if successful, MBEDTLS_ERR_THREADING_MUTEX_ERROR if timeout,
+ * MBEDTLS_ERR_THREADING_BAD_INPUT_DATA if the mutex is not valid.
+ */
+int aws_mbedtls_mutex_lock( mbedtls_threading_mutex_t * mutex )
+{
+    int lRet = MBEDTLS_ERR_THREADING_BAD_INPUT_DATA;
+
+    if( mutex->is_valid == 1 )
+    {
+        if( xSemaphoreTake( mutex->mutex, portMAX_DELAY ) )
+        {
+            lRet = 0;
+        }
+        else
+        {
+            lRet = MBEDTLS_ERR_THREADING_MUTEX_ERROR;
+            /*PKCS11_PRINT( ("Failed to obtain mbedTLS mutex.\r\n") ); */
+        }
+    }
+
+    return lRet;
+}
+
+/**
+ * @brief Implementation of mbedtls_mutex_unlock for thread-safety.
+ *
+ * @return 0 if successful, MBEDTLS_ERR_THREADING_MUTEX_ERROR if timeout,
+ * MBEDTLS_ERR_THREADING_BAD_INPUT_DATA if the mutex is not valid.
+ */
+int aws_mbedtls_mutex_unlock( mbedtls_threading_mutex_t * mutex )
+{
+    int lRet = MBEDTLS_ERR_THREADING_BAD_INPUT_DATA;
+
+    if( mutex->is_valid == 1 )
+    {
+        if( xSemaphoreGive( mutex->mutex ) )
+        {
+            lRet = 0;
+        }
+        else
+        {
+            lRet = MBEDTLS_ERR_THREADING_MUTEX_ERROR;
+            /*PKCS11_PRINT( ("Failed to unlock mbedTLS mutex.\r\n") ); */
+        }
+    }
+
+    return lRet;
+}
+
+void CRYPTO_ConfigureThreading( void )
+{
+    /* Configure mbedtls to use FreeRTOS mutexes. */
+    mbedtls_threading_set_alt( aws_mbedtls_mutex_init,
+                               aws_mbedtls_mutex_free,
+                               aws_mbedtls_mutex_lock,
+                               aws_mbedtls_mutex_unlock );
 }
 
 /**
@@ -157,7 +261,7 @@ BaseType_t CRYPTO_SignatureVerificationStart( void ** ppvContext,
                                               BaseType_t xHashAlgorithm )
 {
     BaseType_t xResult = pdTRUE;
-    SignatureVerificationStatePtr_t pxCtx = NULL;
+    SignatureVerificationState_t * pxCtx = NULL;
 
     /*
      * Allocate the context
@@ -184,16 +288,22 @@ BaseType_t CRYPTO_SignatureVerificationStart( void ** ppvContext,
         if( cryptoHASH_ALGORITHM_SHA1 == pxCtx->xHashAlgorithm )
         {
             mbedtls_sha1_init( &pxCtx->xSHA1Context );
-            ( void )mbedtls_sha1_starts_ret( &pxCtx->xSHA1Context );
+            ( void ) mbedtls_sha1_starts_ret( &pxCtx->xSHA1Context );
         }
         else
         {
             mbedtls_sha256_init( &pxCtx->xSHA256Context );
-            ( void )mbedtls_sha256_starts_ret( &pxCtx->xSHA256Context, 0 );
+            ( void ) mbedtls_sha256_starts_ret( &pxCtx->xSHA256Context, 0 );
         }
     }
 
     return xResult;
+}
+
+void CRYPTO_Init( void )
+{
+    CRYPTO_ConfigureHeap();
+    CRYPTO_ConfigureThreading();
 }
 
 /**
@@ -204,18 +314,18 @@ void CRYPTO_SignatureVerificationUpdate( void * pvContext,
                                          const uint8_t * pucData,
                                          size_t xDataLength )
 {
-    SignatureVerificationStatePtr_t pxCtx = ( SignatureVerificationStatePtr_t ) pvContext; /*lint !e9087 Allow casting void* to other types. */
+    SignatureVerificationState_t * pxCtx = ( SignatureVerificationStatePtr_t ) pvContext; /*lint !e9087 Allow casting void* to other types. */
 
     /*
      * Add the data to the hash of the requested type
      */
     if( cryptoHASH_ALGORITHM_SHA1 == pxCtx->xHashAlgorithm )
     {
-        ( void )mbedtls_sha1_update_ret( &pxCtx->xSHA1Context, pucData, xDataLength );
+        ( void ) mbedtls_sha1_update_ret( &pxCtx->xSHA1Context, pucData, xDataLength );
     }
     else
     {
-        ( void )mbedtls_sha256_update_ret( &pxCtx->xSHA256Context, pucData, xDataLength );
+        ( void ) mbedtls_sha256_update_ret( &pxCtx->xSHA256Context, pucData, xDataLength );
     }
 }
 
@@ -229,54 +339,57 @@ BaseType_t CRYPTO_SignatureVerificationFinal( void * pvContext,
                                               size_t xSignatureLength )
 {
     BaseType_t xResult = pdFALSE;
-	if ( pvContext != NULL )
-	{
-		SignatureVerificationStatePtr_t pxCtx =
-			(SignatureVerificationStatePtr_t)pvContext;	/*lint !e9087 Allow casting void* to other types. */
-		uint8_t ucSHA1or256[cryptoSHA256_DIGEST_BYTES];	/* Reserve enough space for the larger of SHA1 or SHA256 results. */
-		uint8_t * pucHash = NULL;
-		size_t xHashLength = 0;
 
-		if ((pcSignerCertificate != NULL) &&
-			(pucSignature != NULL) &&
-			(xSignerCertificateLength > 0UL) &&
-			(xSignatureLength > 0UL))
-		{
-			/*
-			 * Finish the hash
-			 */
-			if (cryptoHASH_ALGORITHM_SHA1 == pxCtx->xHashAlgorithm)
-			{
-				(void)mbedtls_sha1_finish_ret (&pxCtx->xSHA1Context, ucSHA1or256);
-				pucHash = ucSHA1or256;
-				xHashLength = cryptoSHA1_DIGEST_BYTES;
-			}
-			else
-			{
-				(void)mbedtls_sha256_finish_ret (&pxCtx->xSHA256Context, ucSHA1or256);
-				pucHash = ucSHA1or256;
-				xHashLength = cryptoSHA256_DIGEST_BYTES;
-			}
+    if( pvContext != NULL )
+    {
+        SignatureVerificationState_t * pxCtx =
+            ( SignatureVerificationStatePtr_t ) pvContext; /*lint !e9087 Allow casting void* to other types. */
+        uint8_t ucSHA1or256[ cryptoSHA256_DIGEST_BYTES ];  /* Reserve enough space for the larger of SHA1 or SHA256 results. */
+        uint8_t * pucHash = NULL;
+        size_t xHashLength = 0;
 
-			/*
-			 * Verify the signature
-			 */
-			xResult = prvVerifySignature (pcSignerCertificate,
-				xSignerCertificateLength,
-				pxCtx->xHashAlgorithm,
-				pucHash,
-				xHashLength,
-				pucSignature,
-				xSignatureLength);
-		}
-		else
-		{
-			/* Allow function to be called with only the context pointer for cleanup after a failure. */
-		}
-		/*
-		 * Clean-up
-		 */
-		vPortFree (pxCtx);
-	}
+        if( ( pcSignerCertificate != NULL ) &&
+            ( pucSignature != NULL ) &&
+            ( xSignerCertificateLength > 0UL ) &&
+            ( xSignatureLength > 0UL ) )
+        {
+            /*
+             * Finish the hash
+             */
+            if( cryptoHASH_ALGORITHM_SHA1 == pxCtx->xHashAlgorithm )
+            {
+                ( void ) mbedtls_sha1_finish_ret( &pxCtx->xSHA1Context, ucSHA1or256 );
+                pucHash = ucSHA1or256;
+                xHashLength = cryptoSHA1_DIGEST_BYTES;
+            }
+            else
+            {
+                ( void ) mbedtls_sha256_finish_ret( &pxCtx->xSHA256Context, ucSHA1or256 );
+                pucHash = ucSHA1or256;
+                xHashLength = cryptoSHA256_DIGEST_BYTES;
+            }
+
+            /*
+             * Verify the signature
+             */
+            xResult = prvVerifySignature( pcSignerCertificate,
+                                          xSignerCertificateLength,
+                                          pxCtx->xHashAlgorithm,
+                                          pucHash,
+                                          xHashLength,
+                                          pucSignature,
+                                          xSignatureLength );
+        }
+        else
+        {
+            /* Allow function to be called with only the context pointer for cleanup after a failure. */
+        }
+
+        /*
+         * Clean-up
+         */
+        vPortFree( pxCtx );
+    }
+
     return xResult;
 }
