@@ -61,7 +61,7 @@
  * is available if debugging is enabled.
  */
 #ifndef shadowconfigENABLE_DEBUG_LOGS
-    #define shadowconfigENABLE_DEBUG_LOGS    ( 0 )
+    #define shadowconfigENABLE_DEBUG_LOGS    ( 1 )
 #endif
 
 /**

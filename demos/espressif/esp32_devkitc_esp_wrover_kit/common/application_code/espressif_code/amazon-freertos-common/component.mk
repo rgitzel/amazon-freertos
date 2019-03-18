@@ -41,6 +41,7 @@ COMPONENT_SRCDIRS += ../.. \
     $(AMAZON_FREERTOS_DEMOS_DIR)/common/demo_runner \
     $(AMAZON_FREERTOS_DEMOS_DIR)/common/shadow \
     $(AMAZON_FREERTOS_DEMOS_DIR)/common/mqtt \
+    $(AMAZON_FREERTOS_DEMOS_DIR)/common/temperature \
     $(AMAZON_FREERTOS_DEMOS_DIR)/common/greengrass_connectivity \
     $(AMAZON_FREERTOS_DEMOS_DIR)/common/tcp \
     $(AMAZON_FREERTOS_DEMOS_DIR)/common/ota \
